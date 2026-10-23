@@ -22,9 +22,70 @@ model User {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   accounts      Account[]
+  childCodes    ChildCode[]
+  children      Child[]
 
   @@unique([email])
   @@map("user")
+}
+
+// Dziecko zapisane na koncie rodzica; ma swoje kody i historię rozmów.
+model Child {
+  id        String        @id @default(cuid())
+  name      String
+  parentId  String
+  parent    User          @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  codes     ChildCode[]
+  messages  ChatMessage[]
+  createdAt DateTime      @default(now())
+
+  @@unique([parentId, name])
+  @@map("child")
+}
+
+// Jedno pytanie dziecka i odpowiedź robota.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  childId   String
+  child     Child    @relation(fields: [childId], references: [id], onDelete: Cascade)
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+
+  @@index([childId, createdAt])
+  @@map("chat_message")
+}
+
+// Kod dostępu dla dziecka generowany przez rodzica, np. KAROL-5545.
+model ChildCode {
+  id           String         @id @default(cuid())
+  code         String         @unique
+  childId      String
+  child        Child          @relation(fields: [childId], references: [id], onDelete: Cascade)
+  secondsLimit Int
+  secondsUsed  Int            @default(0)
+  parentId     String
+  parent       User           @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  sessions     ChildSession[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([parentId])
+  @@index([childId])
+  @@map("child_code")
+}
+
+// Sesja urządzenia dziecka po wpisaniu kodu (token trzymany w ciasteczku httpOnly).
+model ChildSession {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  childCodeId String
+  childCode   ChildCode @relation(fields: [childCodeId], references: [id], onDelete: Cascade)
+  lastSeenAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([childCodeId])
+  @@map("child_session")
 }
 
 model Session {
