@@ -54,3 +54,6 @@ dist/
 .env
 
 /src/generated/prisma
+
+# lokalny zrzut bazy (zawiera hashe haseł i tokeny sesji)
+pytajekdb.SQL

@@ -8,8 +8,47 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-nunito);
+  --font-display: var(--font-fredoka);
+}
+
+/* Paleta Pytajka: ciepła biel, pastelowy błękit, słoneczny żółty, mięta, ciepły pomarańcz. */
+@theme {
+  --color-cream: #fbf8f3;
+  --color-cream-dark: #f3eee6;
+  --color-ink: #2b2d42;
+  --color-ink-soft: #6b6f80;
+  --color-sky: #8ecdf4;
+  --color-sky-light: #dff1fc;
+  --color-sky-deep: #3d9bd6;
+  --color-sun: #ffd166;
+  --color-sun-light: #fff4d6;
+  --color-mint: #4fd1b5;
+  --color-mint-light: #dcf7f0;
+  --color-mint-deep: #1fa58a;
+  --color-orange: #ff8c42;
+  --color-orange-deep: #e86f22;
+  --color-orange-light: #ffe8d9;
+
+  --shadow-soft: 0 1px 2px rgb(43 45 66 / 0.04), 0 8px 24px -6px rgb(43 45 66 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(43 45 66 / 0.06), 0 16px 32px -8px rgb(43 45 66 / 0.14);
+
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-bob: bob 3.2s ease-in-out infinite;
+  --animate-twinkle: twinkle 3s ease-in-out infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-14px) rotate(4deg); }
+  }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.35; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +61,19 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Edge dokłada własny przycisk podglądu hasła; mamy swój w AuthInput. */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
