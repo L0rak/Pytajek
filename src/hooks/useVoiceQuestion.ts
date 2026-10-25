@@ -13,12 +13,14 @@ type SpeechRecognitionResultEvent = {
 
 type SpeechRecognitionInstance = {
   lang: string;
+  continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
   onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
+  stop: () => void;
   abort: () => void;
 };
 
@@ -60,28 +62,64 @@ export function useVoiceQuestion() {
   // Chrome potrafi przerwać mowę, jeśli obiekt wypowiedzi zostanie zebrany przez GC.
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const cancelledRef = useRef(false);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestTranscriptRef = useRef("");
+  const submittedRef = useRef(false);
 
   useEffect(() => {
     return () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       recognitionRef.current?.abort();
       window.speechSynthesis?.cancel();
     };
   }, []);
 
   const speak = useCallback((text: string) => {
+    if (!text || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    // Odblokowanie zablokowanej kolejki w Chrome/Edge
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+    window.speechSynthesis.cancel();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = LANG;
-    const voice = window.speechSynthesis
-      .getVoices()
-      .find((v) => v.lang.toLowerCase().startsWith("pl"));
-    if (voice) utterance.voice = voice;
 
-    utterance.onstart = () => setStatus("speaking");
-    utterance.onend = () => setStatus("idle");
-    utterance.onerror = () => setStatus("idle");
+    const voices = window.speechSynthesis.getVoices();
+    const polishVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("pl"));
+
+    // Preferencja stabilnych, dobrze brzmiących głosów
+    const preferredVoice =
+      polishVoices.find((v) => v.name.toLowerCase().includes("google")) ||
+      polishVoices.find((v) => v.name.toLowerCase().includes("natural")) ||
+      polishVoices.find((v) => v.name.toLowerCase().includes("online")) ||
+      polishVoices.find((v) => v.name.toLowerCase().includes("zofia") || v.name.toLowerCase().includes("marek")) ||
+      polishVoices.find((v) => v.name.toLowerCase().includes("paulina") || v.name.toLowerCase().includes("zosia")) ||
+      polishVoices[0];
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      setStatus("speaking");
+    };
+    utterance.onend = () => {
+      setStatus("idle");
+    };
+    utterance.onerror = (e) => {
+      console.warn("Speech synthesis error:", e.error);
+      setStatus("idle");
+    };
 
     utteranceRef.current = utterance;
-    window.speechSynthesis.cancel();
+    // Zapobiegamy zebraniu obiektu przez Garbage Collector w Chrome
+    (window as unknown as { _speechUtterance?: SpeechSynthesisUtterance })._speechUtterance = utterance;
+
     window.speechSynthesis.speak(utterance);
   }, []);
 
@@ -106,39 +144,74 @@ export function useVoiceQuestion() {
     if (!Recognition) return;
 
     cancelledRef.current = false;
+    submittedRef.current = false;
+    latestTranscriptRef.current = "";
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     setError(null);
     window.speechSynthesis.cancel();
 
     const recognition = new Recognition();
     recognition.lang = LANG;
-    recognition.interimResults = false;
+    // Ciągłe nasłuchiwanie oraz cząstkowe wyniki zapobiegają ucinaniu dziecka w trakcie myślenia
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    let gotResult = false;
-
     recognition.onresult = (event) => {
-      const transcript = event.results[0]?.[0]?.transcript?.trim();
-      if (!transcript) return;
-      gotResult = true;
-      void handleQuestion(transcript);
+      const parts: string[] = [];
+      for (let i = 0; i < event.results.length; i++) {
+        const item = event.results[i][0]?.transcript?.trim();
+        if (item) parts.push(item);
+      }
+      const clean = parts.join(" ").trim();
+      if (!clean) return;
+      latestTranscriptRef.current = clean;
+
+      // Resetujemy licznik ciszy przy każdym wypowiedzianym fragmencie
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+
+      // Czekamy 1.4 sekundy ciszy zanim uznamy, że dziecko zadało całe pytanie
+      silenceTimerRef.current = setTimeout(() => {
+        if (submittedRef.current || cancelledRef.current) return;
+        if (latestTranscriptRef.current.length > 2) {
+          submittedRef.current = true;
+          try {
+            recognition.stop();
+          } catch {}
+          void handleQuestion(latestTranscriptRef.current);
+        }
+      }, 1400);
     };
 
     recognition.onerror = (event) => {
       if (event.error === "aborted") return;
-      gotResult = true;
-      setError(
-        event.error === "not-allowed"
-          ? "Brak dostępu do mikrofonu."
-          : "Nie usłyszałem pytania. Spróbuj jeszcze raz."
-      );
-      setStatus("error");
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (!submittedRef.current) {
+        setError(
+          event.error === "not-allowed"
+            ? "Brak dostępu do mikrofonu."
+            : "Nie usłyszałem pytania. Spróbuj jeszcze raz."
+        );
+        setStatus("error");
+      }
     };
 
     recognition.onend = () => {
       recognitionRef.current = null;
-      if (!gotResult && !cancelledRef.current) {
-        setError("Nie usłyszałem pytania. Spróbuj jeszcze raz.");
-        setStatus("error");
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (!submittedRef.current && !cancelledRef.current) {
+        if (latestTranscriptRef.current.length > 2) {
+          submittedRef.current = true;
+          void handleQuestion(latestTranscriptRef.current);
+        } else {
+          setError("Nie usłyszałem pytania. Spróbuj jeszcze raz.");
+          setStatus("error");
+        }
       }
     };
 
@@ -149,6 +222,9 @@ export function useVoiceQuestion() {
 
   const stop = useCallback(() => {
     cancelledRef.current = true;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+    }
     recognitionRef.current?.abort();
     window.speechSynthesis.cancel();
     setStatus("idle");
