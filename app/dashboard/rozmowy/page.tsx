@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, MessageCircle } from "lucide-react";
+import { Download, Loader2, MessageCircle } from "lucide-react";
 import { useChildren } from "@/src/hooks/useChildren";
 import { ChildPicker, NoChildrenHint } from "@/src/components/parent/ChildPicker";
 import { formatDay, formatTime } from "@/src/lib/format";
@@ -66,6 +66,20 @@ function ChatHistory() {
         onSelect={(id) => router.replace(`/dashboard/rozmowy?dziecko=${id}`, { scroll: false })}
         label="Czyje rozmowy pokazać"
       />
+
+      {messages && messages.length > 0 && (
+        <div className="flex justify-end">
+          {/* Plik generuje serwer, więc zawiera całą historię, nie tylko wczytane wiadomości. */}
+          <a
+            href={`/api/children/${childId}/chats/export`}
+            download
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-orange px-6 font-display font-semibold text-white shadow-[0_4px_0_var(--color-orange-deep)] transition hover:brightness-105 active:translate-y-1 active:shadow-none"
+          >
+            <Download className="h-5 w-5" />
+            Pobierz rozmowy (.md)
+          </a>
+        </div>
+      )}
 
       <section className="rounded-[2rem] bg-white p-5 sm:p-8 shadow-soft">
         {messages === null ? (
