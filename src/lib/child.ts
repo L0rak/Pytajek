@@ -8,6 +8,9 @@ export const CHILD_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 // zerwane połączenie) nie jest liczona — liczenie zaczyna się od nowa.
 const MAX_GAP_S = 5;
 
+// Pytania przyjmujemy tylko od otwartego ekranu dziecka, czyli takiego, który wysyła heartbeaty i zużywa czas.
+const ACTIVE_WINDOW_MS = 10_000;
+
 export const MAX_SECONDS_LIMIT = 24 * 60 * 60;
 const MAX_NAME_LENGTH = 20;
 
@@ -46,10 +49,17 @@ export function secondsLeft(code: { secondsLimit: number; secondsUsed: number })
 
 export async function getChildSession(token: string | undefined) {
   if (!token) return null;
-  return prisma.childSession.findUnique({
+  const session = await prisma.childSession.findUnique({
     where: { token },
     include: { childCode: true },
   });
+  // Wiek ciasteczka pilnuje tylko przeglądarka, więc skopiowany token musi wygasać także tutaj.
+  if (!session || Date.now() - session.createdAt.getTime() > CHILD_COOKIE_MAX_AGE * 1000) return null;
+  return session;
+}
+
+export function isChildActive(session: { lastSeenAt: Date | null }): boolean {
+  return !!session.lastSeenAt && Date.now() - session.lastSeenAt.getTime() <= ACTIVE_WINDOW_MS;
 }
 
 // Dolicza czas od ostatniego heartbeatu tej sesji i zwraca aktualny stan kodu.
@@ -72,8 +82,12 @@ export async function chargeChildTime(sessionId: string) {
       lastSeenAt = new Date(session.lastSeenAt.getTime() + elapsed * 1000);
     }
 
-    await tx.childSession.update({ where: { id: sessionId }, data: { lastSeenAt } });
-    if (charge === 0) return session.childCode;
+    // Warunek na poprzedni lastSeenAt: z równoległych heartbeatów ten sam czas nalicza tylko pierwszy.
+    const { count } = await tx.childSession.updateMany({
+      where: { id: sessionId, lastSeenAt: session.lastSeenAt },
+      data: { lastSeenAt },
+    });
+    if (count === 0 || charge === 0) return session.childCode;
     return tx.childCode.update({
       where: { id: session.childCodeId },
       data: { secondsUsed: { increment: charge } },
