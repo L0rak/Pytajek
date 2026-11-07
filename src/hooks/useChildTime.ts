@@ -38,6 +38,8 @@ export function useChildTime() {
       cancelled = true;
       clearInterval(id);
       document.removeEventListener("visibilitychange", beat);
+      // Strona jest tylko ukrywana: po wejściu z nowym kodem nie może mignąć stary, wyczerpany czas.
+      setSecondsLeft(null);
     };
   }, [router]);
 

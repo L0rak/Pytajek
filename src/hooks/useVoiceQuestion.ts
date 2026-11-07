@@ -62,15 +62,21 @@ export function useVoiceQuestion() {
   // Chrome potrafi przerwać mowę, jeśli obiekt wypowiedzi zostanie zebrany przez GC.
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const cancelledRef = useRef(false);
+  // Numer ostatniego pytania: odpowiedź na wcześniejsze lub anulowane pytanie jest pomijana.
+  const requestIdRef = useRef(0);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestTranscriptRef = useRef("");
   const submittedRef = useRef(false);
 
   useEffect(() => {
+    // Po wyjściu z ekranu strona jest tylko ukrywana, więc stan trzeba wyzerować tu, a spóźniona odpowiedź nie może się odezwać.
     return () => {
+      cancelledRef.current = true;
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       recognitionRef.current?.abort();
       window.speechSynthesis?.cancel();
+      setStatus("idle");
+      setError(null);
     };
   }, []);
 
@@ -125,13 +131,15 @@ export function useVoiceQuestion() {
 
   const handleQuestion = useCallback(
     async (question: string) => {
+      const requestId = ++requestIdRef.current;
+      setError(null);
       setStatus("thinking");
       try {
         const answer = await askBackend(question);
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || requestId !== requestIdRef.current) return;
         speak(answer);
       } catch {
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || requestId !== requestIdRef.current) return;
         setError("Nie udało się uzyskać odpowiedzi. Spróbuj ponownie.");
         setStatus("error");
       }
@@ -144,6 +152,7 @@ export function useVoiceQuestion() {
     if (!Recognition) return;
 
     cancelledRef.current = false;
+    requestIdRef.current++;
     submittedRef.current = false;
     latestTranscriptRef.current = "";
     if (silenceTimerRef.current) {

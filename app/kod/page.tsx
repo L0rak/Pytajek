@@ -4,10 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { ResetOnHide } from "@/src/components/ResetOnHide";
 import { SkyBackground } from "@/src/components/robot/SkyBackground";
 
 // Logowanie dziecka kodem od rodzica, np. KAROL-5545.
-export default function ChildCodePage() {
+function ChildCodeForm() {
   const router = useRouter();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export default function ChildCodePage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12 text-ink">
       <SkyBackground />
       <form
+        method="post"
         onSubmit={handleSubmit}
         className="relative w-full max-w-sm space-y-5 rounded-[2.5rem] bg-white/90 p-8 pt-24 shadow-lift backdrop-blur"
       >
@@ -78,5 +80,13 @@ export default function ChildCodePage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function ChildCodePage() {
+  return (
+    <ResetOnHide>
+      <ChildCodeForm />
+    </ResetOnHide>
   );
 }
