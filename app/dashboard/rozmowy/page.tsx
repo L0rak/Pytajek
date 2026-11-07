@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Loader2, MessageCircle } from "lucide-react";
 import { useChildren } from "@/src/hooks/useChildren";
 import { ChildPicker, NoChildrenHint } from "@/src/components/parent/ChildPicker";
+import { LoadError } from "@/src/components/parent/LoadError";
 import { formatDay, formatTime } from "@/src/lib/format";
 
 type Message = { id: string; question: string; answer: string; createdAt: string };
@@ -16,8 +17,9 @@ const REFRESH_MS = 5_000;
 function ChatHistory() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { children } = useChildren();
-  const [history, setHistory] = useState<{ childId: string; messages: Message[] } | null>(null);
+  const { children, reload, failed } = useChildren();
+  const [history, setHistory] = useState<{ childId: string; messages: Message[]; hasMore: boolean } | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
 
   const requestedId = searchParams.get("dziecko");
   const childId =
@@ -28,13 +30,21 @@ function ChatHistory() {
     if (!childId) return;
     let cancelled = false;
     const load = async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch(`/api/children/${childId}/chats`);
-        if (!res.ok || cancelled) return;
-        const data: { messages: Message[] } = await res.json();
-        if (!cancelled) setHistory({ childId, messages: data.messages });
+        if (cancelled) return;
+        if (!res.ok) {
+          setHistoryFailed(true);
+          return;
+        }
+        const data: { messages: Message[]; hasMore: boolean } = await res.json();
+        if (cancelled) return;
+        setHistory({ childId, messages: data.messages, hasMore: data.hasMore });
+        setHistoryFailed(false);
       } catch {
         // Spróbujemy przy następnym odświeżeniu.
+        if (!cancelled) setHistoryFailed(true);
       }
     };
     void load();
@@ -46,9 +56,16 @@ function ChatHistory() {
   }, [childId]);
 
   const messages = history?.childId === childId ? history.messages : null;
+  const hasMore = history?.childId === childId && history.hasMore;
 
   if (children === null) {
-    return <Loader2 className="h-6 w-6 animate-spin text-orange" />;
+    return failed ? (
+      <div className="w-full max-w-3xl">
+        <LoadError text="Nie udało się wczytać listy dzieci." onRetry={reload} />
+      </div>
+    ) : (
+      <Loader2 className="h-6 w-6 animate-spin text-orange" />
+    );
   }
   if (children.length === 0) {
     return (
@@ -81,9 +98,19 @@ function ChatHistory() {
         </div>
       )}
 
+      {hasMore && (
+        <p className="text-center text-sm font-semibold text-ink-soft">
+          Pokazujemy tylko najnowsze rozmowy. Całą historię znajdziesz w pobranym pliku.
+        </p>
+      )}
+
       <section className="rounded-[2rem] bg-white p-5 sm:p-8 shadow-soft">
         {messages === null ? (
-          <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          historyFailed ? (
+            <LoadError text="Nie udało się wczytać rozmów. Próbuję ponownie..." />
+          ) : (
+            <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          )
         ) : messages.length === 0 ? (
           <div className="py-10 text-center">
             <MessageCircle className="mx-auto h-10 w-10 text-sky" />

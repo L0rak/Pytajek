@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlertCircle, Check, Copy, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useChildren } from "@/src/hooks/useChildren";
 import { ChildPicker, NoChildrenHint } from "@/src/components/parent/ChildPicker";
+import { LoadError } from "@/src/components/parent/LoadError";
 
 type ChildCode = {
   id: string;
@@ -35,28 +36,44 @@ function formatSeconds(total: number): string {
 
 export function ChildCodesPanel() {
   const [codes, setCodes] = useState<ChildCode[] | null>(null);
-  const { children } = useChildren();
+  const [codesFailed, setCodesFailed] = useState(false);
+  const { children, reload: reloadChildren, failed: childrenFailed } = useChildren();
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [seconds, setSeconds] = useState("300");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Rośnie po każdej zmianie listy: spóźniona odpowiedź odświeżania nie może jej cofnąć.
+  const codesVersionRef = useRef(0);
 
   // Domyślnie zaznaczone pierwsze dziecko, dopóki rodzic nie wybierze innego.
   const childId =
     children?.find((c) => c.id === selectedChildId)?.id ?? children?.[0]?.id ?? null;
 
   const loadCodes = useCallback(async () => {
-    const res = await fetch("/api/child-codes");
-    if (!res.ok) return;
-    const data: { codes: ChildCode[] } = await res.json();
-    setCodes(data.codes);
+    const version = codesVersionRef.current;
+    try {
+      const res = await fetch("/api/child-codes");
+      if (!res.ok) {
+        setCodesFailed(true);
+        return;
+      }
+      const data: { codes: ChildCode[] } = await res.json();
+      if (version !== codesVersionRef.current) return;
+      setCodes(data.codes);
+      setCodesFailed(false);
+    } catch {
+      setCodesFailed(true);
+    }
   }, []);
+
+  // Strona jest tylko ukrywana przy nawigacji: bez tego po powrocie wracałby stary błąd.
+  useLayoutEffect(() => () => setError(null), []);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      if (!cancelled) void loadCodes().catch(() => {});
+      if (!cancelled && document.visibilityState === "visible") void loadCodes();
     };
     const initial = setTimeout(load, 0);
     const id = setInterval(load, REFRESH_MS);
@@ -82,6 +99,7 @@ export function ChildCodesPanel() {
         setError(data?.error ?? "Nie udało się wygenerować kodu.");
         return;
       }
+      codesVersionRef.current++;
       setCodes((prev) => [data.code, ...(prev ?? [])]);
     } catch {
       setError("Nie udało się wygenerować kodu.");
@@ -91,14 +109,29 @@ export function ChildCodesPanel() {
   };
 
   const handleDelete = async (id: string) => {
-    const res = await fetch(`/api/child-codes/${id}`, { method: "DELETE" });
-    if (res.ok) setCodes((prev) => prev?.filter((c) => c.id !== id) ?? null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/child-codes/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        codesVersionRef.current++;
+        setCodes((prev) => prev?.filter((c) => c.id !== id) ?? null);
+      } else {
+        setError("Nie udało się usunąć kodu.");
+      }
+    } catch {
+      setError("Nie udało się usunąć kodu.");
+    }
   };
 
   const handleCopy = async (code: ChildCode) => {
-    await navigator.clipboard.writeText(code.code);
-    setCopiedId(code.id);
-    setTimeout(() => setCopiedId((id) => (id === code.id ? null : id)), 1500);
+    try {
+      // Przeglądarka udostępnia schowek tylko przez HTTPS lub localhost.
+      await navigator.clipboard.writeText(code.code);
+      setCopiedId(code.id);
+      setTimeout(() => setCopiedId((id) => (id === code.id ? null : id)), 1500);
+    } catch {
+      setError(`Nie udało się skopiować kodu. Przepisz go ręcznie: ${code.code}`);
+    }
   };
 
   const secondsNumber = Number(seconds);
@@ -129,7 +162,13 @@ export function ChildCodesPanel() {
         )}
 
         {children === null ? (
-          <Loader2 className="mt-6 h-6 w-6 animate-spin text-orange" />
+          childrenFailed ? (
+            <div className="mt-6">
+              <LoadError text="Nie udało się wczytać listy dzieci." onRetry={reloadChildren} />
+            </div>
+          ) : (
+            <Loader2 className="mt-6 h-6 w-6 animate-spin text-orange" />
+          )
         ) : children.length === 0 ? (
           <div className="mt-6">
             <NoChildrenHint text="Najpierw dodaj dziecko do konta — potem wybierzesz je tutaj." />
@@ -206,7 +245,11 @@ export function ChildCodesPanel() {
         <h2 className="font-display text-2xl font-semibold text-ink">Kody dzieci</h2>
 
         {codes === null ? (
-          <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          codesFailed ? (
+            <LoadError text="Nie udało się wczytać kodów. Próbuję ponownie..." />
+          ) : (
+            <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          )
         ) : codes.length === 0 ? (
           <div className="rounded-[2rem] border-2 border-dashed border-cream-dark p-8 text-center text-sm font-semibold text-ink-soft">
             Nie masz jeszcze żadnych kodów. Wygeneruj pierwszy powyżej!

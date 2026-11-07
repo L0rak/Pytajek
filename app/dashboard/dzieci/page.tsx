@@ -1,17 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, Loader2, MessageCircle, Plus, Trash2 } from "lucide-react";
 import { useChildren } from "@/src/hooks/useChildren";
+import { LoadError } from "@/src/components/parent/LoadError";
 import { formatDateTime } from "@/src/lib/format";
 
 export default function ChildrenPage() {
-  const { children, setChildren } = useChildren();
+  const { children, setChildren, reload, failed } = useChildren();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Strona jest tylko ukrywana przy nawigacji: bez tego po powrocie wracałby stary błąd i otwarte potwierdzenie.
+  useLayoutEffect(() => {
+    return () => {
+      setError(null);
+      setConfirmDeleteId(null);
+    };
+  }, []);
 
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,8 +47,14 @@ export default function ChildrenPage() {
   };
 
   const handleDelete = async (id: string) => {
-    const res = await fetch(`/api/children/${id}`, { method: "DELETE" });
-    if (res.ok) setChildren((prev) => prev?.filter((c) => c.id !== id) ?? null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/children/${id}`, { method: "DELETE" });
+      if (res.ok) setChildren((prev) => prev?.filter((c) => c.id !== id) ?? null);
+      else setError("Nie udało się usunąć dziecka.");
+    } catch {
+      setError("Nie udało się usunąć dziecka.");
+    }
     setConfirmDeleteId(null);
   };
 
@@ -88,7 +103,11 @@ export default function ChildrenPage() {
         <h2 className="font-display text-2xl font-semibold text-ink">Twoje dzieci</h2>
 
         {children === null ? (
-          <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          failed ? (
+            <LoadError text="Nie udało się wczytać listy dzieci." onRetry={reload} />
+          ) : (
+            <Loader2 className="h-6 w-6 animate-spin text-orange" />
+          )
         ) : children.length === 0 ? (
           <div className="rounded-[2rem] border-2 border-dashed border-cream-dark p-8 text-center text-sm font-semibold text-ink-soft">
             Nie dodano jeszcze żadnego dziecka.
