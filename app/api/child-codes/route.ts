@@ -1,6 +1,9 @@
+import { Prisma } from "@/src/generated/prisma/client";
 import { auth } from "@/src/lib/auth";
 import { prisma } from "@/src/lib/prisma";
 import { MAX_SECONDS_LIMIT, generateUniqueCode, normalizeChildName } from "@/src/lib/child";
+
+const MAX_CREATE_ATTEMPTS = 3;
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -40,14 +43,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const code = await prisma.childCode.create({
-    data: {
-      code: await generateUniqueCode(normalizeChildName(child.name)),
-      childId: child.id,
-      secondsLimit: seconds,
-      parentId: session.user.id,
-    },
-    include: { child: { select: { id: true, name: true } } },
-  });
-  return Response.json({ code }, { status: 201 });
+  // Dwa równoległe żądania mogą wylosować ten sam wolny kod; wtedy losujemy jeszcze raz.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const code = await prisma.childCode.create({
+        data: {
+          code: await generateUniqueCode(normalizeChildName(child.name)),
+          childId: child.id,
+          secondsLimit: seconds,
+          parentId: session.user.id,
+        },
+        include: { child: { select: { id: true, name: true } } },
+      });
+      return Response.json({ code }, { status: 201 });
+    } catch (e) {
+      const isCollision = e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+      if (!isCollision || attempt === MAX_CREATE_ATTEMPTS) throw e;
+    }
+  }
 }
