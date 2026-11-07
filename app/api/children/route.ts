@@ -49,6 +49,15 @@ export async function POST(request: Request) {
     return Response.json({ error: `Imię może mieć najwyżej ${MAX_NAME_LENGTH} znaków` }, { status: 400 });
   }
 
+  // Indeks w bazie rozróżnia wielkość liter, a "Karol" i "karol" to dla rodzica to samo dziecko.
+  const duplicate = await prisma.child.findFirst({
+    where: { parentId: session.user.id, name: { equals: name, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return Response.json({ error: "Masz już dziecko o tym imieniu" }, { status: 409 });
+  }
+
   try {
     const child = await prisma.child.create({
       data: { name, parentId: session.user.id },
