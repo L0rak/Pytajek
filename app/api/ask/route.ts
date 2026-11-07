@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
-import {GoogleGenAI, HarmCategory, HarmBlockThreshold} from "@google/genai"
-import { CHILD_COOKIE, getChildSession, secondsLeft } from "@/src/lib/child";
+import {GoogleGenAI, HarmCategory, HarmBlockThreshold, type GenerateContentResponse} from "@google/genai"
+import { CHILD_COOKIE, getChildSession, isChildActive, secondsLeft } from "@/src/lib/child";
+import { removeEndearments } from "@/src/lib/clean-answer";
 import { prisma } from "@/src/lib/prisma";
+import { isRateLimited, recordAttempt } from "@/src/lib/rate-limit";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -15,10 +17,19 @@ Zasady:
 3. Pamiętaj o kontekście: Dziecko może dopytywać ("a czy one mają trąbę?", "a dlaczego nie?"). Nawiązuj do wcześniejszych pytań.
 4. BEZWZGLĘDNY ZAKAZ EMOJI: Nigdy nie używaj żadnych emotikonów ani emoji (syntezator mowy czyta je na głos jako słowa).
 5. BEZWZGLĘDNY ZAKAZ DŹWIĘKÓW ROBOTA: Pod żadnym pozorem nie pisz żadnych odgłosów robota, onomatopei typu "bip", "bip-bop", "bzzzt", "pik", ani gwiazdek. Mów normalnym, ciepłym głosem.
-6. Bezpieczeństwo dziecka: Tylko w przypadku tematów bezwzględnie nieodpowiednich dla dzieci (przemoc, wulgaryzmy, niebezpieczeństwo, treści intymne), odpowiedz z troską: "To pytanie jest dla starszaków, kochanie. Porozmawiaj o tym z mamą lub tatą."
+6. Bezpieczeństwo dziecka: Tylko w przypadku tematów bezwzględnie nieodpowiednich dla dzieci (przemoc, wulgaryzmy, niebezpieczeństwo, treści intymne), odpowiedz z troską: "To pytanie jest dla starszaków. Porozmawiaj o tym z mamą lub tatą."
 7. Odpowiadaj wyłącznie w czystym tekście w języku polskim.
-8. Nie mów do dziecka "Kochanie"
+8. BEZWZGLĘDNY ZAKAZ CZUŁYCH ZWROTÓW: Nigdy nie zwracaj się do dziecka słowami "kochanie", "kochana", "kochany", "skarbie", "słoneczko" ani podobnymi. Odpowiadaj ciepło, ale bez takich zwrotów, nawet jeśli pojawiły się we wcześniejszej rozmowie.
 `;
+
+// Dłuższe wypowiedzi przycinamy, żeby jedno żądanie nie generowało dowolnie dużego kosztu w modelu.
+const MAX_QUESTION_LENGTH = 500;
+
+// Jedno pytanie głosem trwa kilka sekund, więc ten limit odcina tylko zautomatyzowane zalewanie modelu.
+const MAX_QUESTIONS_PER_MINUTE = 20;
+
+// Starsze rozmowy to już inny temat; model nie powinien do nich nawiązywać.
+const CONTEXT_WINDOW_MS = 30 * 60 * 1000;
 
 export async function POST(request: Request) {
   const cookieStore = await cookies();
@@ -30,25 +41,39 @@ export async function POST(request: Request) {
   if (secondsLeft(session.childCode) === 0) {
     return Response.json({ error: "Time is up" }, { status: 403 });
   }
+  // Czas nalicza heartbeat: bez tego warunku pytania wysyłane bez heartbeatów nie zużywałyby limitu.
+  if (!isChildActive(session)) {
+    return Response.json({ error: "Child screen is not active" }, { status: 403 });
+  }
+  const limitKey = `ask:${session.childCodeId}`;
+  if (isRateLimited(limitKey, MAX_QUESTIONS_PER_MINUTE)) {
+    return Response.json({ error: "Too many questions" }, { status: 429 });
+  }
 
   const body = await request.json().catch(() => null);
-  const question = typeof body?.question === "string" ? body.question.trim() : "";
+  const question =
+    typeof body?.question === "string" ? body.question.trim().slice(0, MAX_QUESTION_LENGTH) : "";
   if (!question) {
     return Response.json({ error: "Missing question" }, { status: 400 });
   }
+  recordAttempt(limitKey);
 
   let answer: string;
 
-  // Pobieramy ostatnie 3 wiadomości, aby model rozumiał kontekst rozmowy
+  // Pobieramy ostatnie 3 wiadomości z bieżącej rozmowy, aby model rozumiał kontekst
   const pastMessages = await prisma.chatMessage.findMany({
-    where: { childId: session.childCode.childId },
+    where: {
+      childId: session.childCode.childId,
+      createdAt: { gte: new Date(Date.now() - CONTEXT_WINDOW_MS) },
+    },
     orderBy: { createdAt: "desc" },
     take: 3,
   });
 
   const formattedHistory = pastMessages
     .reverse()
-    .map((m) => `Dziecko: ${m.question}\nPytajek: ${m.answer}`)
+    // Starsze odpowiedzi też czyścimy, żeby model nie naśladował zwrotów z historii.
+    .map((m) => `Dziecko: ${m.question}\nPytajek: ${removeEndearments(m.answer)}`)
     .join("\n");
 
   const promptWithContext = formattedHistory
@@ -58,8 +83,8 @@ export async function POST(request: Request) {
   const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-lite-latest"];
 
   try {
-    let response: any = null;
-    let lastError: any = null;
+    let response: GenerateContentResponse | null = null;
+    let lastError: unknown = null;
 
     for (const model of candidateModels) {
       try {
@@ -69,7 +94,8 @@ export async function POST(request: Request) {
           config: {
             systemInstruction: SYSTEM_INSTRUCTION,
             temperature: 0.7,
-            maxOutputTokens: 250,
+            // Długość odpowiedzi ogranicza instrukcja; limit jest z zapasem, bo mogą się w nim liczyć tokeny "myślenia" modelu.
+            maxOutputTokens: 1024,
             safetySettings: [
               {
                 category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -91,9 +117,9 @@ export async function POST(request: Request) {
           },
         });
         if (response) break;
-      } catch (err: any) {
+      } catch (err) {
         lastError = err;
-        console.warn(`Model ${model} failed, trying next candidate...`, err?.message || err);
+        console.warn(`Model ${model} failed, trying next candidate...`, err instanceof Error ? err.message : err);
       }
     }
 
@@ -105,11 +131,14 @@ export async function POST(request: Request) {
     if (candidate?.finishReason === "SAFETY") {
       answer = "To pytanie jest trudne lub niebezpieczne. Lepiej zapytaj o to rodziców!";
     } else {
-      answer = response.text?.trim() || "Hmm, nie do końca to zrozumiałem. Możesz zapytać inaczej?";
+      answer =
+        removeEndearments(response.text?.trim() ?? "") ||
+        "Hmm, nie do końca to zrozumiałem. Możesz zapytać inaczej?";
     }
   } catch (err) {
     console.error("Gemini API Error:", err);
-    answer = "Przepraszam, coś mi się pomieszało w kabelkach. Zapytaj mnie jeszcze raz!";
+    // Awarii nie zapisujemy: to nie jest rozmowa, a tekst błędu trafiłby do kontekstu kolejnych pytań.
+    return Response.json({ answer: "Przepraszam, coś mi się pomieszało w kabelkach. Zapytaj mnie jeszcze raz!" });
   }
 
   // Persist conversation for parents in PostgreSQL
