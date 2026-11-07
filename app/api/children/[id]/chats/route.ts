@@ -22,9 +22,13 @@ export async function GET(request: Request, ctx: RouteContext<"/api/children/[id
   const messages = await prisma.chatMessage.findMany({
     where: { childId: child.id },
     orderBy: { createdAt: "desc" },
-    take: MAX_MESSAGES,
+    take: MAX_MESSAGES + 1,
     select: { id: true, question: true, answer: true, createdAt: true },
   });
 
-  return Response.json({ child, messages: messages.reverse() });
+  return Response.json({
+    child,
+    messages: messages.slice(0, MAX_MESSAGES).reverse(),
+    hasMore: messages.length > MAX_MESSAGES,
+  });
 }
