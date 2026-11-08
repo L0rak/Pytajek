@@ -1,5 +1,3 @@
 import { createAuthClient } from "better-auth/react"
-export const authClient = createAuthClient({
-    baseURL: "http://localhost:2337"
-})
-
+// Bez baseURL klient odpytuje /api/auth pod tym samym adresem, z którego otwarto stronę.
+export const authClient = createAuthClient()

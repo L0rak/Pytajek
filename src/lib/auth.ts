@@ -5,6 +5,13 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
+  // Aplikacja działa na jednym komputerze i nie wysyła e-maili, więc te funkcje są wyłączone.
+  disabledPaths: [
+    "/request-password-reset",
+    "/reset-password",
+    "/send-verification-email",
+    "/verify-email",
+  ],
   emailAndPassword:{
     enabled:true
   }

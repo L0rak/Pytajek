@@ -8,7 +8,6 @@ const MESSAGES: Record<string, string> = {
   USER_ALREADY_EXISTS: "Konto z tym adresem e-mail już istnieje.",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "Konto z tym adresem e-mail już istnieje. Użyj innego adresu.",
   FAILED_TO_CREATE_USER: "Nie udało się utworzyć konta.",
-  EMAIL_NOT_VERIFIED: "Adres e-mail nie został potwierdzony.",
 };
 
 export function authErrorMessage(
@@ -16,5 +15,6 @@ export function authErrorMessage(
   fallback: string
 ): string {
   if (error.status === 429) return "Za dużo prób. Spróbuj ponownie za chwilę.";
+  if (error.status && error.status >= 500) return "Błąd serwera. Spróbuj ponownie za chwilę.";
   return (error.code && MESSAGES[error.code]) || fallback;
 }
