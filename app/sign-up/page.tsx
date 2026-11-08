@@ -6,6 +6,7 @@ import Link from "next/link";
 import { authClient } from "@/src/lib/auth-client";
 import { authErrorMessage } from "@/src/lib/auth-errors";
 import { AuthInput } from "@/src/components/auth/AuthInput";
+import { ResetOnHide } from "@/src/components/ResetOnHide";
 import {
   AUTH_BUTTON_CLASS,
   AUTH_LINK_CLASS,
@@ -48,10 +49,13 @@ function PasswordStrength({ password }: { password: string }) {
 
 function getPasswordStrength(password: string) {
   let score = 0;
-  if (password.length >= 8) score++;
-  if (/[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
+  // Krótszego hasła serwer nie przyjmie, więc nie może dostać dobrej oceny.
+  if (password.length >= 8) {
+    score = 1;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+  }
 
   const levels = ["za krótkie", "słabe", "średnie", "dobre", "silne"];
   const colors = [
@@ -69,7 +73,7 @@ function getPasswordStrength(password: string) {
   };
 }
 
-export default function SignUpPage() {
+function SignUpForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -112,7 +116,8 @@ export default function SignUpPage() {
           {
             onSuccess: () => {
               setSuccess(true);
-              router.push("/sign-in?registered=true");
+              // Better Auth loguje od razu po rejestracji, więc rodzic przechodzi prosto do panelu.
+              router.push("/dashboard");
             },
             onError: (ctx) => {
               setError(
@@ -154,11 +159,12 @@ export default function SignUpPage() {
       {success && (
         <AuthAlert tone="success">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <p>Konto utworzone! Przekierowuję do logowania...</p>
+          <p>Konto utworzone! Przekierowuję do panelu...</p>
         </AuthAlert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      {/* method="post": wysłanie przed załadowaniem JS nie może umieścić hasła w adresie URL. */}
+      <form method="post" onSubmit={handleSubmit} className="space-y-5">
         <AuthInput
           id="name"
           name="name"
@@ -248,14 +254,7 @@ export default function SignUpPage() {
             htmlFor="terms"
             className="text-sm leading-relaxed text-ink-soft"
           >
-            Akceptuję{" "}
-            <Link href="#" className={AUTH_LINK_CLASS}>
-              regulamin
-            </Link>{" "}
-            i{" "}
-            <Link href="#" className={AUTH_LINK_CLASS}>
-              politykę prywatności
-            </Link>
+            Akceptuję regulamin i politykę prywatności
           </label>
         </div>
 
@@ -278,5 +277,13 @@ export default function SignUpPage() {
         </Link>
       </p>
     </AuthShell>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <ResetOnHide>
+      <SignUpForm />
+    </ResetOnHide>
   );
 }

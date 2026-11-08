@@ -1,27 +1,25 @@
 "use client";
 
-import { useState, useCallback, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/src/lib/auth-client";
 import { authErrorMessage } from "@/src/lib/auth-errors";
 import { AuthInput } from "@/src/components/auth/AuthInput";
+import { ResetOnHide } from "@/src/components/ResetOnHide";
 import {
   AUTH_BUTTON_CLASS,
   AUTH_LINK_CLASS,
   AuthAlert,
   AuthShell,
 } from "@/src/components/auth/AuthShell";
-import { Loader2, Mail, Lock, AlertCircle, CheckCircle2, Sparkles } from "lucide-react";
+import { Loader2, Mail, Lock, AlertCircle, Sparkles } from "lucide-react";
 
 function SignInForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
-
-  const justRegistered = searchParams.get("registered") === "true";
 
   const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -69,21 +67,15 @@ function SignInForm() {
         <p className="text-sm text-ink-soft">Zaloguj się, aby zarządzać czasem dzieci</p>
       </div>
 
-      {error ? (
+      {error && (
         <AuthAlert tone="error">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <p>{error}</p>
         </AuthAlert>
-      ) : (
-        justRegistered && (
-          <AuthAlert tone="success">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            <p>Konto zostało utworzone! Teraz możesz się zalogować.</p>
-          </AuthAlert>
-        )
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      {/* method="post": wysłanie przed załadowaniem JS nie może umieścić hasła w adresie URL. */}
+      <form method="post" onSubmit={handleSubmit} className="space-y-5">
         <AuthInput
           id="email"
           name="email"
@@ -107,10 +99,6 @@ function SignInForm() {
           autoComplete="current-password"
           placeholder="••••••••"
         />
-
-        <Link href="#" className={`inline-block text-sm ${AUTH_LINK_CLASS}`}>
-          Nie pamiętasz hasła?
-        </Link>
 
         <button type="submit" disabled={isLoading} className={AUTH_BUTTON_CLASS}>
           {isLoading ? (
@@ -136,8 +124,8 @@ function SignInForm() {
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-cream"><Loader2 className="w-8 h-8 text-orange animate-spin" /></div>}>
+    <ResetOnHide>
       <SignInForm />
-    </Suspense>
+    </ResetOnHide>
   );
 }
