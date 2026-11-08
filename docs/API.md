@@ -15,13 +15,14 @@ Są dwa rodzaje użytkowników, każdy z własnym ciasteczkiem:
 | Kto | Jak się loguje | Ciasteczko | Czym sprawdzane w API |
 |---|---|---|---|
 | **Rodzic** | e-mail + hasło (Better Auth, `/api/auth/*`) | sesja Better Auth | `auth.api.getSession({ headers: request.headers })` |
-| **Dziecko** | kod od rodzica, np. `KAROL-5545` (`POST /api/child/login`) | `pytajek_child` (httpOnly, 30 dni) | `getChildSession(token)` z `src/lib/child.ts` |
+| **Dziecko** | kod od rodzica, np. `KAROL-5545` (`POST /api/child/login`) | `pytajek_child` (httpOnly, 30 dni; serwer też odrzuca starsze sesje) | `getChildSession(token)` z `src/lib/child.ts` |
 
 Ciasteczka wysyła przeglądarka sama, więc frontend nie przekazuje żadnych tokenów w nagłówkach.
 
 `proxy.ts` pilnuje stron:
 - `/dashboard/*` – bez sesji rodzica przekierowuje na `/sign-in`,
-- `/robot` – bez ciasteczka dziecka przekierowuje na `/kod`.
+- `/robot` – bez ciasteczka dziecka przekierowuje na `/kod`,
+- `/sign-in`, `/sign-up` – z sesją rodzica przekierowuje na `/dashboard`.
 
 Każdy endpoint i tak sam sprawdza sesję. Rodzic widzi i zmienia wyłącznie swoje dzieci i kody.
 
@@ -123,9 +124,12 @@ Ostatnie 500 rozmów, posortowane od najstarszej do najnowszej.
       "answer": "…",
       "createdAt": "2026-10-23T15:35:00.000Z"
     }
-  ]
+  ],
+  "hasMore": false
 }
 ```
+
+`hasMore` to `true`, gdy starszych rozmów nie ma w odpowiedzi; całą historię zwraca `GET /api/children/{id}/chats/export`.
 
 - `404` – nie ma takiego dziecka albo nie należy do tego rodzica
 
@@ -190,6 +194,7 @@ Wielkość liter i spacje dookoła nie mają znaczenia.
 - `200` → `{ "ok": true }` i ustawia ciasteczko `pytajek_child`
 - `401` – „Nieprawidłowy kod”
 - `403` – „Czas dla tego kodu się skończył”
+- `429` – za dużo błędnych prób (10 na minutę z jednego IP, 30 na minutę na jedno imię z kodu)
 
 ### `POST /api/child/heartbeat`
 
@@ -202,6 +207,7 @@ Zasady naliczania czasu (`chargeChildTime` w `src/lib/child.ts`):
 - Do `secondsUsed` dolicza się czas od poprzedniego heartbeatu tej sesji, w pełnych sekundach.
 - Przerwa dłuższa niż **5 s** (ukryta karta, uśpiony tablet, brak sieci) nie jest liczona, a liczenie zaczyna się od nowa.
 - `secondsUsed` nigdy nie przekracza `secondsLimit`.
+- Równoległe heartbeaty tej samej sesji nie naliczają tego samego czasu dwa razy.
 
 Gdy `secondsLeft` spadnie do 0, ekran dziecka blokuje przycisk i pokazuje „Pytajek odpoczywa!”.
 
@@ -214,11 +220,14 @@ Gdy `secondsLeft` spadnie do 0, ekran dziecka blokuje przycisk i pokazuje „Pyt
 - `200` → `{ "answer": "…" }`
 - `400` – puste pytanie
 - `401` – brak lub nieważna sesja dziecka
-- `403` – czas się skończył
+- `403` – czas się skończył albo ekran dziecka nie wysłał heartbeatu w ciągu ostatnich 10 s
+- `429` – ponad 20 pytań na minutę dla jednego kodu
 
 Pytanie pochodzi z rozpoznawania mowy w przeglądarce (`pl-PL`), a odpowiedź jest **czytana na głos** (`speechSynthesis`). Dopóki API nie odpowie, dziecko widzi „Myślę…”.
 
-Po każdej odpowiedzi para pytanie–odpowiedź jest zapisywana w `chat_message`. Rodzic widzi ją w zakładce „Rozmowy”.
+Pytanie dłuższe niż 500 znaków jest przycinane. Model dostaje do 3 poprzednich wiadomości, ale tylko z ostatnich 30 minut.
+
+Po każdej odpowiedzi para pytanie–odpowiedź jest zapisywana w `chat_message`. Rodzic widzi ją w zakładce „Rozmowy”. Awaria modelu zwraca dziecku komunikat, ale nie jest zapisywana.
 
 ---
 

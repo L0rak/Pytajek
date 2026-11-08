@@ -45,36 +45,41 @@ DATABASE_URL="postgresql://user:password@localhost:5432/pytajek?schema=public"
 
 # Better Auth Secret & Base URL
 BETTER_AUTH_SECRET="your-super-secret-key"
-BETTER_AUTH_URL="http://localhost:3000"
+BETTER_AUTH_URL="http://localhost:2337"
+
+# Gemini API key
+GEMINI_API_KEY="your-gemini-api-key"
 ```
 
 ### 3. Database Operations
 
-Prepare and sync your database schema using Prisma:
+Apply the migrations and generate the client using Prisma:
 
 ```bash
-# Push schema changes to the database during development
-npx prisma db push
+# Apply database migrations
+npx prisma migrate deploy --config prisma7.config.ts
 
 # Generate Prisma Client
-npx prisma generate
+npx prisma generate --config prisma7.config.ts
 
 # (Optional) Open Prisma Studio to inspect data visually
-npx prisma studio
+npx prisma studio --config prisma7.config.ts
 ```
 
 ### 4. Application Lifecycle Commands
 
+Pytajek is meant to run on one computer. Open it at `http://localhost:2337`: the microphone needs `localhost` or HTTPS, and logging in from `127.0.0.1` or a network IP is rejected by the auth origin check. There is no e-mail verification or password reset.
+
 Commands to run, build, and deploy the application:
 
 ```bash
-# Start the local development server with hot-reload
+# Start the local development server with hot-reload (http://localhost:2337)
 npm run dev
 
 # Build the app for production
 npm run build
 
-# Start the production server
+# Start the production server (http://localhost:2337)
 npm run start
 ```
 
