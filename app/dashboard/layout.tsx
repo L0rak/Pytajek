@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { authClient } from "@/src/lib/auth-client";
 import { Loader2, LogOut, User, Home, MessageCircle, Menu, X } from "lucide-react";
 
@@ -40,27 +40,27 @@ const NAV_ITEMS: NavItem[] = [
 
 // Wspólny układ panelu rodzica: menu boczne, nagłówek i sprawdzenie sesji.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
   const { data: session, isPending } = authClient.useSession();
   const [signingOut, setSigningOut] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Pełne przeładowanie zamiast router.push: panel jest tylko ukrywany przez <Activity>, więc jego stan
+  // (signingOut, dane dzieci) dotrwałby do kolejnego logowania, także na inne konto w tej samej karcie.
   useEffect(() => {
-    if (!isPending && !session) router.replace("/sign-in");
-  }, [isPending, session, router]);
+    if (!isPending && !session && !signingOut) window.location.replace("/sign-in");
+  }, [isPending, session, signingOut]);
 
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
-      await authClient.signOut({
-        fetchOptions: {
-          onSuccess: () => {
-            router.push("/sign-in");
-            router.refresh();
-          },
-        },
-      });
+      // Better Auth zwraca błąd serwera w `error` zamiast go rzucać.
+      const { error } = await authClient.signOut();
+      if (error) {
+        setSigningOut(false);
+        return;
+      }
+      window.location.replace("/sign-in");
     } catch {
       setSigningOut(false);
     }
